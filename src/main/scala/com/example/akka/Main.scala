@@ -1,4 +1,3 @@
 package com.example.akka
 
-@main
-def main(): Unit = GreetingMain.run()
+@main def main(): Unit = Greeting.run()
