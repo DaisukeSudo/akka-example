@@ -1,9 +1,15 @@
 package com.example.akka
 
-import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
+import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
+import akka.cluster.sharding.typed.ShardingEnvelope
+import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity, EntityRef, EntityTypeKey}
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior}
+import akka.util.Timeout
+
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.DurationInt
 
 object Accumulating:
 
@@ -25,8 +31,10 @@ object Accumulating:
         emptyState = State(),
         commandHandler = { (_: State, command: Command) =>
           command match {
-            case Add(data) => Effect.persist(Added(data)).thenRun(state => context.log.info("Added   > state: {}", state))
-            case Clear => Effect.persist(Cleared).thenRun(state => context.log.info("Cleared > state: {}", state))
+            case Add(data) => Effect.persist(Added(data))
+              .thenRun(state => context.log.info("Added   > state: {}", state))
+            case Clear => Effect.persist(Cleared)
+              .thenRun(state => context.log.info("Cleared > state: {}", state))
           }
         },
         eventHandler = { (state, event) =>
@@ -39,9 +47,16 @@ object Accumulating:
     }
 
   def run(): Unit =
-    def system = ActorSystem(Accumulating("abc"), "akka-example")
-    system ! Add("Alice")
-    system ! Add("Bob")
-    system ! Clear
-    system ! Add("Eve")
+    val system = ActorSystem(Behaviors.empty, "akka-example")
+    val sharding = ClusterSharding(system)
+    val typeKey = EntityTypeKey[Command]("Accumulating")
+    val aRef = sharding.init(Entity(typeKey = typeKey) { context => Accumulating(context.entityId) }) // ActorRef[ShardingEnvelope[Command]]
+    val eRef = sharding.entityRefFor(typeKey, "abc") // EntityRef[Command]
+
+    eRef ! Add("Alice")
+    eRef ! Add("Bob")
+    eRef ! Clear
+    eRef ! Add("Eve")
+
+    io.StdIn.readLine()
     system.terminate()
